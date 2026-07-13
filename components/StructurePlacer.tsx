@@ -51,8 +51,56 @@ let seq = 0;
 export default function StructurePlacer({ baseImage, busy, onFinalize }: Props) {
   const [items, setItems] = useState<PlacedItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [layoutPrompt, setLayoutPrompt] = useState("");
+  const [layoutBusy, setLayoutBusy] = useState(false);
+  const [layoutError, setLayoutError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
+
+  const requestLayout = async () => {
+    if (!layoutPrompt.trim() || layoutBusy) return;
+    setLayoutBusy(true);
+    setLayoutError(null);
+    try {
+      const res = await fetch("/api/layout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: baseImage, prompt: layoutPrompt }),
+      });
+      const data = (await res.json()) as {
+        placements?: { type: string; x: number; y: number; w: number; rot: number }[];
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error ?? `배치 계산 실패 (${res.status})`);
+      const added: PlacedItem[] = (data.placements ?? [])
+        .map((p) => {
+          const def = STRUCTURES.find((s) => s.type === p.type);
+          if (!def) return null;
+          return {
+            id: `pl_${++seq}`,
+            type: def.type,
+            src: def.src,
+            x: p.x,
+            y: p.y,
+            w: p.w,
+            rot: p.rot,
+          };
+        })
+        .filter((p): p is PlacedItem => p !== null);
+      if (added.length === 0) {
+        setLayoutError("배치할 구조물을 만들지 못했습니다. 지시를 바꿔보세요.");
+      } else {
+        setItems((prev) => [...prev, ...added]);
+        setLayoutPrompt("");
+      }
+    } catch (e) {
+      setLayoutError(
+        e instanceof Error ? e.message : "배치 계산 중 오류가 발생했습니다."
+      );
+    } finally {
+      setLayoutBusy(false);
+    }
+  };
 
   const addItem = (def: StructureDef) => {
     const item: PlacedItem = {
@@ -267,6 +315,41 @@ export default function StructurePlacer({ baseImage, busy, onFinalize }: Props) 
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <h2 className="mb-1 font-medium">AI 배치 지시</h2>
+          <p className="mb-3 text-xs text-gray-400">
+            글로 지시하면 AI가 공간에 맞게 구조물을 배치합니다. 배치된 것은
+            전부 드래그·회전·크기조절로 수정할 수 있어요.
+          </p>
+          <textarea
+            value={layoutPrompt}
+            onChange={(e) => setLayoutPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                requestLayout();
+              }
+            }}
+            disabled={busy || layoutBusy}
+            placeholder="예: 원형 테이블 3개를 가운데 놓고 의자 12개를 극장식으로 배치해줘"
+            rows={3}
+            className="w-full resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-50"
+          />
+          {layoutError && (
+            <p className="mt-1 text-xs text-red-500">{layoutError}</p>
+          )}
+          <button
+            onClick={requestLayout}
+            disabled={busy || layoutBusy || !layoutPrompt.trim()}
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+          >
+            {layoutBusy && (
+              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+            )}
+            {layoutBusy ? "배치 계산 중…" : "AI로 배치하기"}
+          </button>
         </div>
 
         {items.length > 0 && (

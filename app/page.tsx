@@ -50,7 +50,29 @@ export default function Home() {
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [drawMode, setDrawMode] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const userBoxSeq = useRef(0);
+
+  const addUserBox = (bbox: [number, number, number, number]) => {
+    const id = `user_${++userBoxSeq.current}`;
+    setObjects((prev) => [
+      ...prev,
+      {
+        id,
+        label: `직접 지정 ${userBoxSeq.current}`,
+        classification: "remove",
+        bbox,
+        confidence: 1,
+      },
+    ]);
+    setSelectedId(id);
+  };
+
+  const removeUserBox = (id: string) => {
+    setObjects((prev) => prev.filter((o) => o.id !== id));
+    if (selectedId === id) setSelectedId(null);
+  };
 
   const loadFile = useCallback((file: File) => {
     if (!file.type.startsWith("image/")) {
@@ -129,6 +151,7 @@ export default function Home() {
     );
 
     setStep("generating");
+    setDrawMode(false);
     setError(null);
     try {
       const res = await fetch("/api/generate", {
@@ -180,6 +203,8 @@ export default function Home() {
     setPlacing(false);
     setSelectedId(null);
     setError(null);
+    setDrawMode(false);
+    userBoxSeq.current = 0;
     setStep("upload");
   };
 
@@ -255,6 +280,8 @@ export default function Home() {
               objects={step === "review" || step === "generating" ? objects : []}
               selectedId={selectedId}
               onSelect={setSelectedId}
+              drawMode={drawMode && step === "review"}
+              onDraw={addUserBox}
             />
           </div>
 
@@ -317,16 +344,31 @@ export default function Home() {
                             {Math.round(o.confidence * 100)}%
                           </span>
                         </span>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleClassification(o.id);
-                          }}
-                          disabled={step === "generating"}
-                          className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium ${CLASSIFICATION_CHIP[o.classification]} disabled:opacity-50`}
-                        >
-                          {CLASSIFICATION_LABEL[o.classification]}
-                        </button>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleClassification(o.id);
+                            }}
+                            disabled={step === "generating"}
+                            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${CLASSIFICATION_CHIP[o.classification]} disabled:opacity-50`}
+                          >
+                            {CLASSIFICATION_LABEL[o.classification]}
+                          </button>
+                          {o.id.startsWith("user_") && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeUserBox(o.id);
+                              }}
+                              disabled={step === "generating"}
+                              className="flex h-5 w-5 items-center justify-center rounded-full text-gray-400 hover:bg-red-100 hover:text-red-600 disabled:opacity-50"
+                              title="영역 삭제"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </span>
                       </li>
                     ))}
                     {objects.length === 0 && (
@@ -336,6 +378,21 @@ export default function Home() {
                     )}
                   </ul>
                 </div>
+
+                {step === "review" && (
+                  <button
+                    onClick={() => setDrawMode((v) => !v)}
+                    className={`rounded-lg border px-4 py-2 text-sm font-medium ${
+                      drawMode
+                        ? "border-red-400 bg-red-50 text-red-600"
+                        : "border-gray-300 text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    {drawMode
+                      ? "그리기 종료 (드래그해서 영역 추가 중)"
+                      : "+ 지울 영역 직접 그리기"}
+                  </button>
+                )}
 
                 {step === "review" ? (
                   <button
