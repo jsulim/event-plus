@@ -79,6 +79,8 @@ export default function ImageAnnotator({
         const [x, y, w, h] = obj.bbox;
         const s = STYLE[obj.classification];
         const selected = obj.id === selectedId;
+        // 박스가 많으면 라벨 텍스트는 선택된 것만 표시 (화면이 지저분해지지 않게)
+        const showLabel = selected || objects.length <= 12;
         return (
           <button
             key={obj.id}
@@ -95,13 +97,15 @@ export default function ImageAnnotator({
             }}
             title={obj.label}
           >
-            <span
-              className={`absolute -top-6 left-0 whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium text-white ${s.label} ${
-                selected ? "" : "opacity-90"
-              }`}
-            >
-              {obj.label}
-            </span>
+            {showLabel && (
+              <span
+                className={`absolute -top-6 left-0 whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium text-white ${s.label} ${
+                  selected ? "" : "opacity-90"
+                }`}
+              >
+                {obj.label}
+              </span>
+            )}
           </button>
         );
       })}

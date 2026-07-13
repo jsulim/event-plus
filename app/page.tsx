@@ -4,6 +4,8 @@ import { useCallback, useRef, useState } from "react";
 import ImageAnnotator from "@/components/ImageAnnotator";
 import CompareSlider from "@/components/CompareSlider";
 import StructurePlacer from "@/components/StructurePlacer";
+import { detectWithYolo, warmupYolo } from "@/lib/yolo";
+import { mergeDetections } from "@/lib/merge";
 import type {
   AnalyzeResponse,
   Classification,
@@ -79,6 +81,7 @@ export default function Home() {
       setError("이미지 파일만 업로드할 수 있습니다.");
       return;
     }
+    warmupYolo(); // 미리 모델 로드 시작 (분석 버튼 누를 때쯤 준비 완료)
     const reader = new FileReader();
     reader.onload = () => {
       setImage(reader.result as string);
@@ -96,21 +99,42 @@ export default function Home() {
     if (!image) return;
     setStep("analyzing");
     setError(null);
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image }),
-      });
-      const data = (await res.json()) as AnalyzeResponse & { error?: string };
-      if (!res.ok) throw new Error(data.error ?? `분석 실패 (${res.status})`);
-      setObjects(data.objects);
-      setOriginalObjects(data.objects);
-      setStep("review");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "분석 중 오류가 발생했습니다.");
+
+    // YOLO(브라우저, 인스턴스 단위) + GPT(도메인 물체) 병렬 실행 후 병합
+    const [gptResult, yoloResult] = await Promise.allSettled([
+      (async () => {
+        const res = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image }),
+        });
+        const data = (await res.json()) as AnalyzeResponse & { error?: string };
+        if (!res.ok) throw new Error(data.error ?? `분석 실패 (${res.status})`);
+        return data.objects;
+      })(),
+      detectWithYolo(image),
+    ]);
+
+    if (gptResult.status === "rejected" && yoloResult.status === "rejected") {
+      console.error("[analyze] gpt:", gptResult.reason, "yolo:", yoloResult.reason);
+      setError("분석 중 오류가 발생했습니다. 다시 시도해주세요.");
       setStep("upload");
+      return;
     }
+    if (gptResult.status === "rejected") {
+      console.warn("[analyze] GPT 분석 실패, YOLO 결과만 사용:", gptResult.reason);
+    }
+    if (yoloResult.status === "rejected") {
+      console.warn("[analyze] YOLO 탐지 실패, GPT 결과만 사용:", yoloResult.reason);
+    }
+
+    const merged = mergeDetections(
+      yoloResult.status === "fulfilled" ? yoloResult.value : [],
+      gptResult.status === "fulfilled" ? gptResult.value : []
+    );
+    setObjects(merged);
+    setOriginalObjects(merged);
+    setStep("review");
   };
 
   const toggleClassification = (id: string) => {
@@ -121,6 +145,32 @@ export default function Home() {
           : o
       )
     );
+  };
+
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  const toggleGroupClassification = (label: string) => {
+    setObjects((prev) => {
+      const states = new Set(
+        prev.filter((o) => o.label === label).map((o) => o.classification)
+      );
+      const target: Classification =
+        states.size === 1
+          ? NEXT_CLASSIFICATION[[...states][0]]
+          : "remove";
+      return prev.map((o) =>
+        o.label === label ? { ...o, classification: target } : o
+      );
+    });
+  };
+
+  const toggleGroupExpand = (label: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
   };
 
   const generate = async () => {
@@ -209,6 +259,58 @@ export default function Home() {
   };
 
   const removeCount = objects.filter((o) => o.classification === "remove").length;
+
+  // 라벨별 그룹 (사람 47명 같은 대량 결과를 접어서 표시)
+  const groupMap = new Map<string, DetectedObject[]>();
+  for (const o of objects) {
+    const list = groupMap.get(o.label);
+    if (list) list.push(o);
+    else groupMap.set(o.label, [o]);
+  }
+  const groups = [...groupMap.entries()];
+  const selectedLabel = objects.find((o) => o.id === selectedId)?.label ?? null;
+
+  const renderObjectRow = (o: DetectedObject, indent = false) => (
+    <li
+      key={o.id}
+      onClick={() => setSelectedId(selectedId === o.id ? null : o.id)}
+      className={`flex cursor-pointer items-center justify-between gap-2 py-2 pr-4 text-sm ${
+        indent ? "pl-9" : "pl-4"
+      } ${selectedId === o.id ? "bg-blue-50" : "hover:bg-gray-50"}`}
+    >
+      <span className="truncate">
+        {o.label}
+        <span className="ml-1.5 text-xs text-gray-400">
+          {Math.round(o.confidence * 100)}%
+        </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-1.5">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleClassification(o.id);
+          }}
+          disabled={step === "generating"}
+          className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${CLASSIFICATION_CHIP[o.classification]} disabled:opacity-50`}
+        >
+          {CLASSIFICATION_LABEL[o.classification]}
+        </button>
+        {o.id.startsWith("user_") && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              removeUserBox(o.id);
+            }}
+            disabled={step === "generating"}
+            className="flex h-5 w-5 items-center justify-center rounded-full text-gray-400 hover:bg-red-100 hover:text-red-600 disabled:opacity-50"
+            title="영역 삭제"
+          >
+            ×
+          </button>
+        )}
+      </span>
+    </li>
+  );
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8">
@@ -323,54 +425,63 @@ export default function Home() {
                       </span>
                     </h2>
                     <p className="mt-1 text-xs text-gray-400">
-                      분류 배지를 클릭하면 제거 → 보존 → 확인 필요 순으로
-                      바뀝니다. &quot;확인 필요&quot;는 제거되지 않습니다.
+                      배지 클릭 시 제거 → 보존 → 확인 필요 순으로 바뀝니다
+                      (그룹 배지는 전체 일괄 변경). 이미지에서 박스를 클릭하면
+                      개별 선택·수정할 수 있어요. &quot;확인 필요&quot;는
+                      제거되지 않습니다.
                     </p>
                   </div>
                   <ul className="max-h-96 divide-y divide-gray-100 overflow-y-auto">
-                    {objects.map((o) => (
-                      <li
-                        key={o.id}
-                        onClick={() =>
-                          setSelectedId(selectedId === o.id ? null : o.id)
-                        }
-                        className={`flex cursor-pointer items-center justify-between gap-2 px-4 py-2.5 text-sm ${
-                          selectedId === o.id ? "bg-blue-50" : "hover:bg-gray-50"
-                        }`}
-                      >
-                        <span className="truncate">
-                          {o.label}
-                          <span className="ml-1.5 text-xs text-gray-400">
-                            {Math.round(o.confidence * 100)}%
-                          </span>
-                        </span>
-                        <span className="flex shrink-0 items-center gap-1.5">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleClassification(o.id);
-                            }}
-                            disabled={step === "generating"}
-                            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${CLASSIFICATION_CHIP[o.classification]} disabled:opacity-50`}
+                    {groups.map(([label, items]) => {
+                      if (items.length === 1) return renderObjectRow(items[0]);
+                      const states = new Set(
+                        items.map((i) => i.classification)
+                      );
+                      const uniform =
+                        states.size === 1 ? [...states][0] : null;
+                      const expanded =
+                        expandedGroups.has(label) || label === selectedLabel;
+                      return (
+                        <li key={label}>
+                          <div
+                            onClick={() => toggleGroupExpand(label)}
+                            className="flex cursor-pointer items-center justify-between gap-2 px-4 py-2.5 text-sm hover:bg-gray-50"
                           >
-                            {CLASSIFICATION_LABEL[o.classification]}
-                          </button>
-                          {o.id.startsWith("user_") && (
+                            <span className="flex items-center gap-1.5 truncate font-medium">
+                              <span className="text-xs text-gray-400">
+                                {expanded ? "▾" : "▸"}
+                              </span>
+                              {label}
+                              <span className="text-xs font-normal text-gray-400">
+                                × {items.length}
+                              </span>
+                            </span>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                removeUserBox(o.id);
+                                toggleGroupClassification(label);
                               }}
                               disabled={step === "generating"}
-                              className="flex h-5 w-5 items-center justify-center rounded-full text-gray-400 hover:bg-red-100 hover:text-red-600 disabled:opacity-50"
-                              title="영역 삭제"
+                              title="그룹 전체 분류 변경"
+                              className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium disabled:opacity-50 ${
+                                uniform
+                                  ? CLASSIFICATION_CHIP[uniform]
+                                  : "border-gray-300 bg-gray-100 text-gray-600"
+                              }`}
                             >
-                              ×
+                              {uniform
+                                ? `전체 ${CLASSIFICATION_LABEL[uniform]}`
+                                : "혼합"}
                             </button>
+                          </div>
+                          {expanded && (
+                            <ul className="divide-y divide-gray-50 bg-gray-50/60">
+                              {items.map((o) => renderObjectRow(o, true))}
+                            </ul>
                           )}
-                        </span>
-                      </li>
-                    ))}
+                        </li>
+                      );
+                    })}
                     {objects.length === 0 && (
                       <li className="px-4 py-6 text-center text-sm text-gray-400">
                         탐지된 객체가 없습니다.

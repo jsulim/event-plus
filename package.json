@@ -3,13 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/copy-ort-wasm.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-ort-wasm.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
     "next": "^15.3.3",
+    "onnxruntime-web": "^1.27.0",
     "openai": "^5.1.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

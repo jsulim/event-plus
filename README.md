@@ -8,8 +8,18 @@
 ## 기술 스택
 
 - Next.js (App Router) + TypeScript + Tailwind CSS
-- OpenAI API — `gpt-4o` (물체 탐지·분류), `gpt-image-1` (이미지 편집/인페인팅)
+- 하이브리드 객체 탐지:
+  - **YOLOX-S** (ONNX, Apache-2.0) — 브라우저에서 onnxruntime-web으로 실행.
+    사람·의자·테이블·모니터 등 COCO 클래스를 인스턴스 단위(개별 박스)로 탐지
+  - **GPT-4o** — 배너·부스·포토월·무대 등 행사 도메인 물체 탐지와 고정/가변 분류
+  - 두 결과를 IoU·포함관계 기준으로 병합 (GPT가 무리를 뭉뚱그린 박스는 제거)
+- OpenAI API — `gpt-image-1` (이미지 편집/인페인팅), `gpt-4o` (배치 지시 해석)
 - DB 없음 — 세션 상태(React state)로만 동작
+
+YOLOX 모델(`public/models/yolox_s.onnx`, ~36MB)은 저장소에 포함되어 있으며
+[Megvii YOLOX 릴리스](https://github.com/Megvii-BaseDetection/YOLOX/releases)에서
+받은 것입니다. onnxruntime-web의 wasm 런타임은 빌드 시
+`scripts/copy-ort-wasm.mjs`가 `public/ort/`로 복사합니다.
 
 ## 실행 방법
 
