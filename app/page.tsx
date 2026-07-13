@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import ImageAnnotator from "@/components/ImageAnnotator";
 import CompareSlider from "@/components/CompareSlider";
+import StructurePlacer from "@/components/StructurePlacer";
 import type {
   AnalyzeResponse,
   Classification,
@@ -10,7 +11,14 @@ import type {
   GenerateResponse,
 } from "@/lib/types";
 
-type Step = "upload" | "analyzing" | "review" | "generating" | "result";
+type Step =
+  | "upload"
+  | "analyzing"
+  | "review"
+  | "generating"
+  | "result"
+  | "place"
+  | "placed";
 
 const NEXT_CLASSIFICATION: Record<Classification, Classification> = {
   remove: "preserve",
@@ -37,6 +45,9 @@ export default function Home() {
   const [originalObjects, setOriginalObjects] = useState<DetectedObject[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [resultImage, setResultImage] = useState<string | null>(null);
+  const [placeBase, setPlaceBase] = useState<string | null>(null);
+  const [placedImage, setPlacedImage] = useState<string | null>(null);
+  const [placing, setPlacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -138,11 +149,35 @@ export default function Home() {
     }
   };
 
+  const placeStructures = async (collage: string, itemCount: number) => {
+    setPlacing(true);
+    setError(null);
+    console.log(`[place] ${itemCount}개 구조물 합성 요청`);
+    try {
+      const res = await fetch("/api/place", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: collage }),
+      });
+      const data = (await res.json()) as GenerateResponse & { error?: string };
+      if (!res.ok) throw new Error(data.error ?? `배치 실패 (${res.status})`);
+      setPlacedImage(data.resultImage);
+      setStep("placed");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "배치 중 오류가 발생했습니다.");
+    } finally {
+      setPlacing(false);
+    }
+  };
+
   const reset = () => {
     setImage(null);
     setObjects([]);
     setOriginalObjects([]);
     setResultImage(null);
+    setPlaceBase(null);
+    setPlacedImage(null);
+    setPlacing(false);
     setSelectedId(null);
     setError(null);
     setStep("upload");
@@ -208,7 +243,11 @@ export default function Home() {
       )}
 
       {/* 2~4단계: 미리보기 / 분석 / 수정 */}
-      {image && step !== "result" && (
+      {image &&
+        (step === "upload" ||
+          step === "analyzing" ||
+          step === "review" ||
+          step === "generating") && (
         <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
           <div>
             <ImageAnnotator
@@ -333,7 +372,16 @@ export default function Home() {
       {image && resultImage && step === "result" && (
         <div className="flex flex-col gap-4">
           <CompareSlider before={image} after={resultImage} />
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => {
+                setPlaceBase(resultImage);
+                setStep("place");
+              }}
+              className="rounded-lg bg-green-600 px-4 py-2.5 font-medium text-white hover:bg-green-700"
+            >
+              구조물 배치하기 →
+            </button>
             <a
               href={resultImage}
               download="event-plus-result.png"
@@ -346,6 +394,53 @@ export default function Home() {
               className="rounded-lg border border-gray-300 px-4 py-2.5 text-gray-600 hover:bg-gray-50"
             >
               분류 다시 수정
+            </button>
+            <button
+              onClick={reset}
+              className="rounded-lg border border-gray-300 px-4 py-2.5 text-gray-600 hover:bg-gray-50"
+            >
+              새 사진으로 시작
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 6단계: 구조물 배치 */}
+      {placeBase && step === "place" && (
+        <StructurePlacer
+          baseImage={placeBase}
+          busy={placing}
+          onFinalize={placeStructures}
+        />
+      )}
+
+      {/* 7단계: 배치 결과 */}
+      {placeBase && placedImage && step === "placed" && (
+        <div className="flex flex-col gap-4">
+          <CompareSlider before={placeBase} after={placedImage} />
+          <div className="flex flex-wrap gap-3">
+            <a
+              href={placedImage}
+              download="event-plus-placed.png"
+              className="rounded-lg bg-blue-600 px-4 py-2.5 font-medium text-white hover:bg-blue-700"
+            >
+              결과 이미지 다운로드
+            </a>
+            <button
+              onClick={() => {
+                setPlaceBase(placedImage);
+                setPlacedImage(null);
+                setStep("place");
+              }}
+              className="rounded-lg bg-green-600 px-4 py-2.5 font-medium text-white hover:bg-green-700"
+            >
+              이어서 더 배치하기
+            </button>
+            <button
+              onClick={() => setStep("place")}
+              className="rounded-lg border border-gray-300 px-4 py-2.5 text-gray-600 hover:bg-gray-50"
+            >
+              다시 배치
             </button>
             <button
               onClick={reset}
