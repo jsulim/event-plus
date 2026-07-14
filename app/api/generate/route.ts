@@ -36,6 +36,32 @@ interface GenerateRequestBody {
   preserveLabels?: string[];
 }
 
+/** fal.ai Bria Eraser — 제거 전용 모델 (수 초, 마스크 밖 원본 완전 보존) */
+async function eraseWithFal(
+  imagePng: Buffer,
+  maskWhitePng: Buffer
+): Promise<Buffer> {
+  const res = await fetch("https://fal.run/fal-ai/bria/eraser", {
+    method: "POST",
+    headers: {
+      Authorization: `Key ${process.env.FAL_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      image_url: `data:image/png;base64,${imagePng.toString("base64")}`,
+      mask_url: `data:image/png;base64,${maskWhitePng.toString("base64")}`,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`fal eraser 실패 (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  }
+  const data = (await res.json()) as { image?: { url?: string } };
+  if (!data.image?.url) throw new Error("fal eraser 응답에 이미지가 없습니다.");
+  const imgRes = await fetch(data.image.url);
+  if (!imgRes.ok) throw new Error(`fal 결과 다운로드 실패 (${imgRes.status})`);
+  return Buffer.from(await imgRes.arrayBuffer());
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { image, boxes, removeLabels, preserveLabels } =
@@ -70,20 +96,55 @@ export async function POST(req: NextRequest) {
 
     const { width, height } = resized.info;
 
-    // 마스크 생성: 전체 불투명, 제거 영역만 알파 0 (OpenAI edits 규격:
-    // "fully transparent areas indicate where the image should be edited")
+    // 제거 영역 사각형 목록 (패딩: 박스 크기 비례 5% + 최소 0.3%)
+    const rects: [number, number, number, number][] = boxes.map(
+      ([bx, by, bw, bh]) => {
+        const padX = bw * 0.05 + 0.003;
+        const padY = bh * 0.05 + 0.003;
+        return [
+          Math.max(0, Math.floor((bx - padX) * width)),
+          Math.max(0, Math.floor((by - padY) * height)),
+          Math.min(width, Math.ceil((bx + bw + padX) * width)),
+          Math.min(height, Math.ceil((by + bh + padY) * height)),
+        ];
+      }
+    );
+
+    // 1순위: fal.ai Bria Eraser (흰색=제거 마스크, 수 초)
+    if (process.env.FAL_KEY) {
+      try {
+        const whiteMask = Buffer.alloc(width * height * 3, 0);
+        for (const [x0, y0, x1, y1] of rects) {
+          for (let y = y0; y < y1; y++) {
+            for (let x = x0; x < x1; x++) {
+              const i = (y * width + x) * 3;
+              whiteMask[i] = 255;
+              whiteMask[i + 1] = 255;
+              whiteMask[i + 2] = 255;
+            }
+          }
+        }
+        const whiteMaskPng = await sharp(whiteMask, {
+          raw: { width, height, channels: 3 },
+        })
+          .png()
+          .toBuffer();
+        const erased = await eraseWithFal(resized.data, whiteMaskPng);
+        const body: GenerateResponse = {
+          resultImage: `data:image/png;base64,${erased.toString("base64")}`,
+        };
+        return NextResponse.json(body);
+      } catch (falErr) {
+        console.warn("[/api/generate] fal 실패, OpenAI로 폴백:", falErr);
+      }
+    }
+
+    // 폴백: OpenAI gpt-image-1 (알파 0 = 편집 영역 마스크)
     const mask = Buffer.alloc(width * height * 4);
     for (let i = 0; i < width * height; i++) {
       mask[i * 4 + 3] = 255; // opaque black
     }
-    for (const [bx, by, bw, bh] of boxes) {
-      // 경계 패딩: 박스 크기에 비례(5%) + 최소 0.3% — 주변 물체 침범 최소화
-      const padX = bw * 0.05 + 0.003;
-      const padY = bh * 0.05 + 0.003;
-      const x0 = Math.max(0, Math.floor((bx - padX) * width));
-      const y0 = Math.max(0, Math.floor((by - padY) * height));
-      const x1 = Math.min(width, Math.ceil((bx + bw + padX) * width));
-      const y1 = Math.min(height, Math.ceil((by + bh + padY) * height));
+    for (const [x0, y0, x1, y1] of rects) {
       for (let y = y0; y < y1; y++) {
         for (let x = x0; x < x1; x++) {
           mask[(y * width + x) * 4 + 3] = 0; // transparent = edit here
