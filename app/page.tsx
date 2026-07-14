@@ -6,6 +6,7 @@ import CompareSlider from "@/components/CompareSlider";
 import StructurePlacer from "@/components/StructurePlacer";
 import { detectWithYolo, warmupYolo } from "@/lib/yolo";
 import { mergeDetections } from "@/lib/merge";
+import { findSimilarRegions } from "@/lib/similar";
 import type {
   AnalyzeResponse,
   Classification,
@@ -58,17 +59,55 @@ export default function Home() {
 
   const addUserBox = (bbox: [number, number, number, number]) => {
     const id = `user_${++userBoxSeq.current}`;
+    const seq = userBoxSeq.current;
     setObjects((prev) => [
       ...prev,
       {
         id,
-        label: `직접 지정 ${userBoxSeq.current}`,
+        label: `직접 지정 ${seq}`,
         classification: "remove",
         bbox,
         confidence: 1,
       },
     ]);
     setSelectedId(id);
+
+    // 그린 영역과 유사한 반복 객체를 자동 탐지해 제안 (브라우저 연산, 비용 없음)
+    if (image) {
+      findSimilarRegions(image, bbox)
+        .then((boxes) => {
+          if (boxes.length === 0) return;
+          setObjects((prev) => {
+            // 기존 박스와 크게 겹치는 제안은 제외
+            const fresh = boxes.filter((b) =>
+              prev.every((o) => {
+                const ix = Math.max(
+                  0,
+                  Math.min(o.bbox[0] + o.bbox[2], b[0] + b[2]) -
+                    Math.max(o.bbox[0], b[0])
+                );
+                const iy = Math.max(
+                  0,
+                  Math.min(o.bbox[1] + o.bbox[3], b[1] + b[3]) -
+                    Math.max(o.bbox[1], b[1])
+                );
+                return ix * iy < 0.4 * Math.min(o.bbox[2] * o.bbox[3], b[2] * b[3]);
+              })
+            );
+            return [
+              ...prev,
+              ...fresh.map((b, i) => ({
+                id: `user_sim_${seq}_${i + 1}`,
+                label: `유사 객체 (직접 지정 ${seq})`,
+                classification: "remove" as const,
+                bbox: b,
+                confidence: 0.7,
+              })),
+            ];
+          });
+        })
+        .catch((e) => console.warn("[similar] 탐지 실패:", e));
+    }
   };
 
   const removeUserBox = (id: string) => {
@@ -529,7 +568,7 @@ export default function Home() {
                     }`}
                   >
                     {drawMode
-                      ? "그리기 종료 (드래그해서 영역 추가 중)"
+                      ? "그리기 종료 (드래그해서 영역 추가 중 — 비슷한 객체도 자동 탐지됩니다)"
                       : "+ 지울 영역 직접 그리기"}
                   </button>
                 )}
