@@ -38,7 +38,7 @@ interface GenerateRequestBody {
 
 /** fal.ai Bria Eraser — 제거 전용 모델 (수 초, 마스크 밖 원본 완전 보존) */
 async function eraseWithFal(
-  imagePng: Buffer,
+  imageJpeg: Buffer,
   maskWhitePng: Buffer
 ): Promise<Buffer> {
   const res = await fetch("https://fal.run/fal-ai/bria/eraser", {
@@ -48,7 +48,7 @@ async function eraseWithFal(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      image_url: `data:image/png;base64,${imagePng.toString("base64")}`,
+      image_url: `data:image/jpeg;base64,${imageJpeg.toString("base64")}`,
       mask_url: `data:image/png;base64,${maskWhitePng.toString("base64")}`,
     }),
   });
@@ -129,7 +129,9 @@ export async function POST(req: NextRequest) {
         })
           .png()
           .toBuffer();
-        const erased = await eraseWithFal(resized.data, whiteMaskPng);
+        // 업로드 크기 절감: fal 전송은 JPEG로 (PNG 대비 ~1/8)
+        const jpeg = await sharp(resized.data).jpeg({ quality: 90 }).toBuffer();
+        const erased = await eraseWithFal(jpeg, whiteMaskPng);
         const body: GenerateResponse = {
           resultImage: `data:image/png;base64,${erased.toString("base64")}`,
         };

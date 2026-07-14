@@ -17,6 +17,35 @@ const FLOORPLAN_PROMPT = `이 행사 공간 사진을 아이소메트릭(쿼터�
 - 깔끔한 행사 제안서용 3D 렌더링 품질: 부드러운 조명, 정돈된 색감, 검은색 배경
 - 사진에 없는 물체를 새로 추가하지 마세요`;
 
+const KONTEXT_PROMPT = `Convert this event venue photo into an isometric cutaway 3D miniature rendering, viewed from above at an angle. Keep the room structure (walls, stage, doors, windows) and the arrangement, rows and approximate count of all furniture and fixtures the same. Clean presentation-quality 3D render style, soft lighting, black background. Do not add objects that are not in the photo.`;
+
+/** fal.ai FLUX Kontext — 지시 기반 이미지 변환 (~15초) */
+async function floorplanWithFal(imagePng: Buffer): Promise<Buffer> {
+  const res = await fetch("https://fal.run/fal-ai/flux-pro/kontext", {
+    method: "POST",
+    headers: {
+      Authorization: `Key ${process.env.FAL_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: KONTEXT_PROMPT,
+      image_url: `data:image/jpeg;base64,${imagePng.toString("base64")}`,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`fal kontext 실패 (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  }
+  const data = (await res.json()) as {
+    images?: { url?: string }[];
+    image?: { url?: string };
+  };
+  const url = data.images?.[0]?.url ?? data.image?.url;
+  if (!url) throw new Error("fal kontext 응답에 이미지가 없습니다.");
+  const imgRes = await fetch(url);
+  if (!imgRes.ok) throw new Error(`fal 결과 다운로드 실패 (${imgRes.status})`);
+  return Buffer.from(await imgRes.arrayBuffer());
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { image } = (await req.json()) as { image?: string };
@@ -38,6 +67,21 @@ export async function POST(req: NextRequest) {
       })
       .png()
       .toBuffer();
+
+    // 1순위: fal.ai FLUX Kontext (~15초), 실패 시 gpt-image-1 폴백
+    if (process.env.FAL_KEY) {
+      try {
+        // 업로드 크기 절감: fal 전송은 JPEG로 (PNG 대비 ~1/8)
+        const jpeg = await sharp(resized).jpeg({ quality: 90 }).toBuffer();
+        const converted = await floorplanWithFal(jpeg);
+        const body: GenerateResponse = {
+          resultImage: `data:image/png;base64,${converted.toString("base64")}`,
+        };
+        return NextResponse.json(body);
+      } catch (falErr) {
+        console.warn("[/api/floorplan] fal 실패, OpenAI로 폴백:", falErr);
+      }
+    }
 
     const result = await openai.images.edit({
       model: "gpt-image-1",
