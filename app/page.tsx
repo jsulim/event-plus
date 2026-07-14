@@ -345,18 +345,18 @@ export default function Home() {
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-12">
-      <header className="mb-10">
+      <header className="mb-10 flex flex-col items-center text-center">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/logo.png"
           alt="event PLUS"
-          className="h-12 w-auto"
+          className="h-20 w-auto"
           draggable={false}
         />
-        <h1 className="mt-5 text-4xl font-bold">
+        <h1 className="mt-6 text-4xl font-bold">
           AI 행사 공간 시뮬레이터
         </h1>
-        <p className="mt-2.5 max-w-3xl text-base leading-relaxed text-gray-500">
+        <p className="mt-3 max-w-3xl text-base leading-relaxed text-gray-500">
           국내 최대 행사 매칭 플랫폼 <b className="text-gray-700">이벤트플러스</b>가
           직접 진행한 수많은 행사 이미지 데이터로 학습된 AI와 함께, 행사장
           사진 한 장으로 빈 공간 생성부터 구조물 배치, 제안용 조감도까지
