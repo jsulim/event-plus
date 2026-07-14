@@ -344,32 +344,32 @@ export default function Home() {
   );
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8">
-      <header className="mb-8">
+    <main className="mx-auto max-w-7xl px-6 py-12">
+      <header className="mb-10">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/logo.png"
           alt="event PLUS"
-          className="h-9 w-auto"
+          className="h-12 w-auto"
           draggable={false}
         />
-        <h1 className="mt-4 text-2xl font-bold">
+        <h1 className="mt-5 text-4xl font-bold">
           AI 행사 공간 시뮬레이터
         </h1>
-        <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-gray-500">
+        <p className="mt-2.5 max-w-3xl text-base leading-relaxed text-gray-500">
           국내 최대 행사 매칭 플랫폼 <b className="text-gray-700">이벤트플러스</b>가
           직접 진행한 수많은 행사 이미지 데이터로 학습된 AI와 함께, 행사장
           사진 한 장으로 빈 공간 생성부터 구조물 배치, 제안용 조감도까지
           만들어보세요.
         </p>
-        <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-sm text-gray-600">
+        <label className="mt-4 inline-flex cursor-pointer items-center gap-2 text-base text-gray-600">
           <input
             type="checkbox"
             checked={precise}
             onChange={(e) => setPrecise(e.target.checked)}
-            className="h-4 w-4 accent-blue-600"
+            className="h-5 w-5 accent-blue-600"
           />
-          정밀 모드 <span className="text-xs text-gray-400">(기본 켜짐 — 끄면 빠르지만 품질이 떨어집니다)</span>
+          정밀 모드 <span className="text-sm text-gray-400">(기본 켜짐 — 끄면 빠르지만 품질이 떨어집니다)</span>
         </label>
       </header>
 
@@ -394,16 +394,16 @@ export default function Home() {
             if (file) loadFile(file);
           }}
           onClick={() => fileInputRef.current?.click()}
-          className={`flex h-72 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed transition-colors ${
+          className={`flex h-[28rem] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed transition-colors ${
             dragOver
               ? "border-blue-500 bg-blue-50"
               : "border-gray-300 bg-white hover:border-gray-400"
           }`}
         >
-          <p className="text-lg font-medium text-gray-700">
+          <p className="text-2xl font-medium text-gray-700">
             사진을 여기에 끌어다 놓거나 클릭해서 선택하세요
           </p>
-          <p className="mt-2 text-sm text-gray-400">JPG, PNG 등 이미지 파일</p>
+          <p className="mt-3 text-base text-gray-400">JPG, PNG 등 이미지 파일</p>
           <input
             ref={fileInputRef}
             type="file"
