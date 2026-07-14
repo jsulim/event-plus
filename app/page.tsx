@@ -396,14 +396,14 @@ export default function Home() {
           onClick={() => fileInputRef.current?.click()}
           className={`flex h-[28rem] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed transition-colors ${
             dragOver
-              ? "border-blue-500 bg-blue-50"
-              : "border-gray-300 bg-white hover:border-gray-400"
+              ? "border-sky-500 bg-sky-50"
+              : "border-sky-300 bg-white hover:border-sky-400 hover:bg-sky-50/50"
           }`}
         >
           <p className="text-2xl font-medium text-gray-700">
             사진을 여기에 끌어다 놓거나 클릭해서 선택하세요
           </p>
-          <p className="mt-3 text-base text-gray-400">JPG, PNG 등 이미지 파일</p>
+          <p className="mt-3 text-base text-sky-400">JPG, PNG 등 이미지 파일</p>
           <input
             ref={fileInputRef}
             type="file"
@@ -441,13 +441,13 @@ export default function Home() {
               <>
                 <button
                   onClick={analyze}
-                  className="rounded-lg bg-blue-600 px-4 py-3 font-medium text-white hover:bg-blue-700"
+                  className="rounded-lg bg-sky-500 px-4 py-3 font-medium text-white hover:bg-sky-600"
                 >
                   분석하기
                 </button>
                 <button
                   onClick={reset}
-                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 hover:bg-gray-50"
+                  className="rounded-lg border border-sky-300 px-4 py-2 text-sm text-sky-600 hover:bg-sky-50"
                 >
                   다른 사진 선택
                 </button>
