@@ -323,12 +323,21 @@ export default function Home() {
   return (
     <main className="mx-auto max-w-6xl px-4 py-8">
       <header className="mb-8">
-        <h1 className="text-2xl font-bold">
-          이벤트플러스 <span className="font-normal text-gray-500">빈 공간 생성기</span>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/logo.png"
+          alt="event PLUS"
+          className="h-9 w-auto"
+          draggable={false}
+        />
+        <h1 className="mt-4 text-2xl font-bold">
+          AI 행사 공간 시뮬레이터
         </h1>
-        <p className="mt-1 text-sm text-gray-500">
-          행사 공간 사진을 업로드하면 AI가 임시 설치물을 찾아 제거된 빈 공간
-          이미지를 만들어 드립니다.
+        <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-gray-500">
+          국내 최대 행사 매칭 플랫폼 <b className="text-gray-700">이벤트플러스</b>가
+          직접 진행한 수많은 행사 이미지 데이터로 학습된 AI와 함께, 행사장
+          사진 한 장으로 빈 공간 생성부터 구조물 배치, 제안용 조감도까지
+          만들어보세요.
         </p>
       </header>
 
