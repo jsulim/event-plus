@@ -15,9 +15,95 @@ const PLACE_PROMPT = `이 이미지는 실제 공간 사진 위에 행사 구조
 바닥에 닿는 부분에는 자연스러운 그림자를 추가하세요.
 배경 공간(벽, 바닥, 천장, 기둥, 조명)은 원본 그대로 유지하고, 구조물을 추가로 만들어 넣지 마세요.`;
 
+const KONTEXT_PLACE_PROMPT = `This photo has furniture/structure cutouts composited onto a real venue photo.
+Redraw the composited objects as photorealistic, matching the room's perspective and lighting, and add natural floor shadows.
+Keep each object at exactly the same position, size and orientation. Do not change the room background and do not add new objects.`;
+
+interface PlaceRequestBody {
+  image?: string;
+  /** 배치된 구조물들의 bbox (0~1 정규화 [x,y,w,h]) — 배경 보존 합성용 */
+  boxes?: [number, number, number, number][];
+}
+
+/** fal.ai FLUX Kontext 호출 → 결과 버퍼 */
+async function kontextRedraw(imageJpeg: Buffer): Promise<Buffer> {
+  const res = await fetch("https://fal.run/fal-ai/flux-pro/kontext", {
+    method: "POST",
+    headers: {
+      Authorization: `Key ${process.env.FAL_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: KONTEXT_PLACE_PROMPT,
+      image_url: `data:image/jpeg;base64,${imageJpeg.toString("base64")}`,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`fal kontext 실패 (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  }
+  const data = (await res.json()) as {
+    images?: { url?: string }[];
+    image?: { url?: string };
+  };
+  const url = data.images?.[0]?.url ?? data.image?.url;
+  if (!url) throw new Error("fal kontext 응답에 이미지가 없습니다.");
+  const imgRes = await fetch(url);
+  if (!imgRes.ok) throw new Error(`fal 결과 다운로드 실패 (${imgRes.status})`);
+  return Buffer.from(await imgRes.arrayBuffer());
+}
+
+/**
+ * Kontext 결과에서 구조물 영역만 취하고 나머지는 원본 픽셀로 되돌린다.
+ * 모델이 배경(바닥 재질 등)을 바꿔도 구조물 밖은 원본이 보장된다.
+ */
+async function compositePreservingBackground(
+  originalPng: Buffer,
+  redrawn: Buffer,
+  boxes: [number, number, number, number][],
+  width: number,
+  height: number
+): Promise<Buffer> {
+  // 결과를 원본 크기로 맞춤 (Kontext는 출력 해상도가 다를 수 있음)
+  const redrawnResized = await sharp(redrawn)
+    .resize(width, height, { fit: "fill" })
+    .removeAlpha()
+    .toBuffer();
+
+  // 구조물 영역 + 그림자 여유(아래쪽 확장) 마스크, 경계는 블러로 페더링
+  const mask = Buffer.alloc(width * height, 0);
+  for (const [bx, by, bw, bh] of boxes) {
+    const padX = bw * 0.12 + 0.008;
+    const padTop = bh * 0.08 + 0.005;
+    const padBottom = bh * 0.25 + 0.01; // 바닥 그림자가 생길 공간
+    const x0 = Math.max(0, Math.floor((bx - padX) * width));
+    const y0 = Math.max(0, Math.floor((by - padTop) * height));
+    const x1 = Math.min(width, Math.ceil((bx + bw + padX) * width));
+    const y1 = Math.min(height, Math.ceil((by + bh + padBottom) * height));
+    for (let y = y0; y < y1; y++) mask.fill(255, y * width + x0, y * width + x1);
+  }
+  const feathered = await sharp(mask, {
+    raw: { width, height, channels: 1 },
+  })
+    .blur(Math.max(2, Math.round(Math.min(width, height) * 0.008)))
+    .toBuffer();
+
+  // 마스크를 알파로 얹어 원본 위에 합성
+  const redrawnWithAlpha = await sharp(redrawnResized, {
+    raw: { width, height, channels: 3 },
+  })
+    .joinChannel(feathered, { raw: { width, height, channels: 1 } })
+    .png()
+    .toBuffer();
+
+  return sharp(originalPng)
+    .composite([{ input: redrawnWithAlpha }])
+    .png()
+    .toBuffer();
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const { image } = (await req.json()) as { image?: string };
+    const { image, boxes } = (await req.json()) as PlaceRequestBody;
 
     if (!image || !image.startsWith("data:image/")) {
       return NextResponse.json(
@@ -36,11 +122,34 @@ export async function POST(req: NextRequest) {
         withoutEnlargement: true,
       })
       .png()
-      .toBuffer();
+      .toBuffer({ resolveWithObject: true });
+    const { width, height } = resized.info;
 
+    // 1순위: fal Kontext 실사화 + 구조물 영역만 취하는 배경 보존 합성 (~15초)
+    if (process.env.FAL_KEY && boxes && boxes.length > 0) {
+      try {
+        const jpeg = await sharp(resized.data).jpeg({ quality: 90 }).toBuffer();
+        const redrawn = await kontextRedraw(jpeg);
+        const merged = await compositePreservingBackground(
+          resized.data,
+          redrawn,
+          boxes,
+          width,
+          height
+        );
+        const body: GenerateResponse = {
+          resultImage: `data:image/png;base64,${merged.toString("base64")}`,
+        };
+        return NextResponse.json(body);
+      } catch (falErr) {
+        console.warn("[/api/place] fal 실패, OpenAI로 폴백:", falErr);
+      }
+    }
+
+    // 폴백: gpt-image-1 (배경 보존은 input_fidelity: high에 의존)
     const result = await openai.images.edit({
       model: "gpt-image-1",
-      image: await toFile(resized, "image.png", { type: "image/png" }),
+      image: await toFile(resized.data, "image.png", { type: "image/png" }),
       prompt: PLACE_PROMPT,
       size: "auto",
       quality: "medium",

@@ -43,7 +43,12 @@ interface DragState {
 interface Props {
   baseImage: string;
   busy: boolean;
-  onFinalize: (collageDataUrl: string, itemCount: number) => void;
+  onFinalize: (
+    collageDataUrl: string,
+    itemCount: number,
+    /** 배치된 구조물들의 축 정렬 bbox (0~1 정규화 [x,y,w,h], 회전 반영) */
+    itemBoxes: [number, number, number, number][]
+  ) => void;
 }
 
 let seq = 0;
@@ -241,6 +246,7 @@ export default function StructurePlacer({ baseImage, busy, onFinalize }: Props) 
     const ctx = canvas.getContext("2d")!;
     ctx.drawImage(base, 0, 0);
 
+    const itemBoxes: [number, number, number, number][] = [];
     for (const item of items) {
       const sprite = await loadImg(item.src);
       const w = item.w * canvas.width;
@@ -250,10 +256,23 @@ export default function StructurePlacer({ baseImage, busy, onFinalize }: Props) 
       ctx.rotate((item.rot * Math.PI) / 180);
       ctx.drawImage(sprite, -w / 2, -h / 2, w, h);
       ctx.restore();
+
+      // 회전 반영 축 정렬 경계 상자 (배경 보존 합성용)
+      const rad = (item.rot * Math.PI) / 180;
+      const extX = Math.abs((w / 2) * Math.cos(rad)) + Math.abs((h / 2) * Math.sin(rad));
+      const extY = Math.abs((w / 2) * Math.sin(rad)) + Math.abs((h / 2) * Math.cos(rad));
+      const cx = item.x * canvas.width;
+      const cy = item.y * canvas.height;
+      itemBoxes.push([
+        Math.max(0, (cx - extX) / canvas.width),
+        Math.max(0, (cy - extY) / canvas.height),
+        Math.min(1, (2 * extX) / canvas.width),
+        Math.min(1, (2 * extY) / canvas.height),
+      ]);
     }
 
     // PNG는 사진 콜라주에서 수 MB가 되어 서버 전송 제한(4.5MB)에 걸릴 수 있어 JPEG 사용
-    onFinalize(canvas.toDataURL("image/jpeg", 0.92), items.length);
+    onFinalize(canvas.toDataURL("image/jpeg", 0.92), items.length, itemBoxes);
   };
 
   return (

@@ -281,7 +281,11 @@ export default function Home() {
     }
   };
 
-  const placeStructures = async (collage: string, itemCount: number) => {
+  const placeStructures = async (
+    collage: string,
+    itemCount: number,
+    itemBoxes: [number, number, number, number][]
+  ) => {
     setPlacing(true);
     setError(null);
     console.log(`[place] ${itemCount}개 구조물 합성 요청`);
@@ -289,7 +293,7 @@ export default function Home() {
       const res = await fetch("/api/place", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: collage }),
+        body: JSON.stringify({ image: collage, boxes: itemBoxes }),
       });
       const data = (await res.json()) as GenerateResponse & { error?: string };
       if (!res.ok) throw new Error(data.error ?? `배치 실패 (${res.status})`);
