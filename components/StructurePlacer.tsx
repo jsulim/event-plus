@@ -252,7 +252,8 @@ export default function StructurePlacer({ baseImage, busy, onFinalize }: Props) 
       ctx.restore();
     }
 
-    onFinalize(canvas.toDataURL("image/png"), items.length);
+    // PNG는 사진 콜라주에서 수 MB가 되어 서버 전송 제한(4.5MB)에 걸릴 수 있어 JPEG 사용
+    onFinalize(canvas.toDataURL("image/jpeg", 0.92), items.length);
   };
 
   return (

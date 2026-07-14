@@ -84,13 +84,25 @@ export default function Home() {
     warmupYolo(); // 미리 모델 로드 시작 (분석 버튼 누를 때쯤 준비 완료)
     const reader = new FileReader();
     reader.onload = () => {
-      setImage(reader.result as string);
-      setObjects([]);
-      setOriginalObjects([]);
-      setResultImage(null);
-      setSelectedId(null);
-      setError(null);
-      setStep("upload");
+      // 서버 전송량 제한(Vercel 4.5MB) 대비: 최대 2048px JPEG로 축소
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 2048;
+        const scale = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.naturalWidth * scale);
+        canvas.height = Math.round(img.naturalHeight * scale);
+        canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+        setImage(canvas.toDataURL("image/jpeg", 0.9));
+        setObjects([]);
+        setOriginalObjects([]);
+        setResultImage(null);
+        setSelectedId(null);
+        setError(null);
+        setStep("upload");
+      };
+      img.onerror = () => setError("이미지를 읽을 수 없습니다.");
+      img.src = reader.result as string;
     };
     reader.readAsDataURL(file);
   }, []);
