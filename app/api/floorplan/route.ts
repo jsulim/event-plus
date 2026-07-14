@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
       image: await toFile(resized, "image.png", { type: "image/png" }),
       prompt: FLOORPLAN_PROMPT,
       size: "auto",
+      quality: "medium",
     });
 
     const b64 = result.data?.[0]?.b64_json;

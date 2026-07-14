@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
       image: await toFile(resized, "image.png", { type: "image/png" }),
       prompt: PLACE_PROMPT,
       size: "auto",
+      quality: "medium",
       input_fidelity: "high",
     });
 

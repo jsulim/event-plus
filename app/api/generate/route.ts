@@ -102,6 +102,7 @@ export async function POST(req: NextRequest) {
       mask: await toFile(maskPng, "mask.png", { type: "image/png" }),
       prompt: buildEditPrompt(removeLabels ?? [], preserveLabels ?? []),
       size: "auto",
+      quality: "medium",
       input_fidelity: "high",
     });
 
