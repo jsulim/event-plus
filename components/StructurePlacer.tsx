@@ -54,8 +54,47 @@ export default function StructurePlacer({ baseImage, busy, onFinalize }: Props) 
   const [layoutPrompt, setLayoutPrompt] = useState("");
   const [layoutBusy, setLayoutBusy] = useState(false);
   const [layoutError, setLayoutError] = useState<string | null>(null);
+  const [customDefs, setCustomDefs] = useState<StructureDef[]>([]);
+  const [spriteName, setSpriteName] = useState("");
+  const [spriteBusy, setSpriteBusy] = useState(false);
+  const [spriteError, setSpriteError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
+
+  const allDefs = [...STRUCTURES, ...customDefs];
+
+  const createSprite = async () => {
+    const name = spriteName.trim();
+    if (!name || spriteBusy) return;
+    setSpriteBusy(true);
+    setSpriteError(null);
+    try {
+      const res = await fetch("/api/sprite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = (await res.json()) as { sprite?: string; error?: string };
+      if (!res.ok || !data.sprite) {
+        throw new Error(data.error ?? `구조물 생성 실패 (${res.status})`);
+      }
+      const def: StructureDef = {
+        type: `custom_${++seq}`,
+        label: name,
+        src: data.sprite,
+        initialW: 0.18,
+      };
+      setCustomDefs((prev) => [...prev, def]);
+      addItem(def); // 만들자마자 화면에 배치
+      setSpriteName("");
+    } catch (e) {
+      setSpriteError(
+        e instanceof Error ? e.message : "구조물 생성 중 오류가 발생했습니다."
+      );
+    } finally {
+      setSpriteBusy(false);
+    }
+  };
 
   const requestLayout = async () => {
     if (!layoutPrompt.trim() || layoutBusy) return;
@@ -65,7 +104,11 @@ export default function StructurePlacer({ baseImage, busy, onFinalize }: Props) 
       const res = await fetch("/api/layout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: baseImage, prompt: layoutPrompt }),
+        body: JSON.stringify({
+          image: baseImage,
+          prompt: layoutPrompt,
+          structures: allDefs.map((d) => ({ type: d.type, label: d.label })),
+        }),
       });
       const data = (await res.json()) as {
         placements?: { type: string; x: number; y: number; w: number; rot: number }[];
@@ -74,7 +117,7 @@ export default function StructurePlacer({ baseImage, busy, onFinalize }: Props) 
       if (!res.ok) throw new Error(data.error ?? `배치 계산 실패 (${res.status})`);
       const added: PlacedItem[] = (data.placements ?? [])
         .map((p) => {
-          const def = STRUCTURES.find((s) => s.type === p.type);
+          const def = allDefs.find((s) => s.type === p.type);
           if (!def) return null;
           return {
             id: `pl_${++seq}`,
@@ -297,7 +340,7 @@ export default function StructurePlacer({ baseImage, busy, onFinalize }: Props) 
             위쪽 핸들로 회전, 오른쪽 아래 핸들로 크기 조절.
           </p>
           <div className="grid grid-cols-3 gap-2">
-            {STRUCTURES.map((def) => (
+            {allDefs.map((def) => (
               <button
                 key={def.type}
                 onClick={() => addItem(def)}
@@ -314,6 +357,40 @@ export default function StructurePlacer({ baseImage, busy, onFinalize }: Props) 
                 <span className="text-xs text-gray-600">{def.label}</span>
               </button>
             ))}
+          </div>
+          <div className="mt-3 border-t border-gray-100 pt-3">
+            <p className="mb-2 text-xs text-gray-400">
+              목록에 없는 구조물은 이름을 입력하면 AI가 만들어 추가합니다
+              (~15초)
+            </p>
+            <div className="flex gap-2">
+              <input
+                value={spriteName}
+                onChange={(e) => setSpriteName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    createSprite();
+                  }
+                }}
+                disabled={busy || spriteBusy}
+                placeholder="예: 포토월, LED 스크린"
+                className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-50"
+              />
+              <button
+                onClick={createSprite}
+                disabled={busy || spriteBusy || !spriteName.trim()}
+                className="flex shrink-0 items-center gap-1.5 rounded-lg bg-gray-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+              >
+                {spriteBusy && (
+                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                )}
+                {spriteBusy ? "생성 중" : "만들기"}
+              </button>
+            </div>
+            {spriteError && (
+              <p className="mt-1 text-xs text-red-500">{spriteError}</p>
+            )}
           </div>
         </div>
 

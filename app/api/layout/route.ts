@@ -5,15 +5,26 @@ export const maxDuration = 60;
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const SYSTEM_PROMPT = `당신은 행사 공간 배치 전문가입니다. 사용자가 공간 사진과 함께 배치 지시를 주면,
+const SIZE_HINTS: Record<string, string> = {
+  chair: "연회용 의자 1개 (폭 약 0.5m)",
+  table: "원형 연회 테이블 1개 (지름 약 1.5m)",
+  booth: "전시 부스 1개 (약 3m x 3m)",
+  stage: "이동식 무대 (약 4~6m 폭)",
+  banner: "롤업 배너 스탠드 1개 (폭 약 0.8m, 세로로 긴 형태)",
+};
+
+const buildSystemPrompt = (
+  structures: { type: string; label: string }[]
+) => `당신은 행사 공간 배치 전문가입니다. 사용자가 공간 사진과 함께 배치 지시를 주면,
 사용 가능한 구조물을 사진 속 공간에 어울리게 배치한 좌표 목록을 반환하세요.
 
-사용 가능한 구조물 종류(type)와 실제 크기 감각:
-- chair: 연회용 의자 1개 (폭 약 0.5m)
-- table: 원형 연회 테이블 1개 (지름 약 1.5m)
-- booth: 전시 부스 1개 (약 3m x 3m)
-- stage: 이동식 무대 (약 4~6m 폭)
-- banner: 롤업 배너 스탠드 1개 (폭 약 0.8m, 세로로 긴 형태)
+사용 가능한 구조물 종류(type):
+${structures
+  .map(
+    (s) =>
+      `- ${s.type}: ${s.label}${SIZE_HINTS[s.type] ? ` — ${SIZE_HINTS[s.type]}` : " — 이름에서 실제 크기를 상식적으로 추정"}`
+  )
+  .join("\n")}
 
 좌표 규칙:
 - x, y: 구조물 중심의 위치. 이미지 좌상단 (0,0) ~ 우하단 (1,1) 정규화 좌표
@@ -30,41 +41,48 @@ const SYSTEM_PROMPT = `당신은 행사 공간 배치 전문가입니다. 사용
 - 지시에 개수가 있으면 정확히 그 개수만큼, 없으면 공간에 맞는 적절한 개수로.
 - 최대 80개까지만 배치하세요.`;
 
-const JSON_SCHEMA = {
-  name: "layout_placements",
-  strict: true,
-  schema: {
-    type: "object",
-    properties: {
-      placements: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            type: {
-              type: "string",
-              enum: ["chair", "table", "booth", "stage", "banner"],
+const buildJsonSchema = (types: string[]) =>
+  ({
+    name: "layout_placements",
+    strict: true,
+    schema: {
+      type: "object",
+      properties: {
+        placements: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: types },
+              x: { type: "number" },
+              y: { type: "number" },
+              w: { type: "number" },
+              rot: { type: "number" },
             },
-            x: { type: "number" },
-            y: { type: "number" },
-            w: { type: "number" },
-            rot: { type: "number" },
+            required: ["type", "x", "y", "w", "rot"],
+            additionalProperties: false,
           },
-          required: ["type", "x", "y", "w", "rot"],
-          additionalProperties: false,
         },
       },
+      required: ["placements"],
+      additionalProperties: false,
     },
-    required: ["placements"],
-    additionalProperties: false,
-  },
-} as const;
+  }) as const;
+
+const DEFAULT_STRUCTURES = [
+  { type: "chair", label: "의자" },
+  { type: "table", label: "테이블" },
+  { type: "booth", label: "부스" },
+  { type: "stage", label: "무대" },
+  { type: "banner", label: "배너" },
+];
 
 export async function POST(req: NextRequest) {
   try {
-    const { image, prompt } = (await req.json()) as {
+    const { image, prompt, structures } = (await req.json()) as {
       image?: string;
       prompt?: string;
+      structures?: { type: string; label: string }[];
     };
 
     if (!image || !image.startsWith("data:image/")) {
@@ -80,12 +98,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const structureList = (
+      Array.isArray(structures) && structures.length > 0
+        ? structures
+        : DEFAULT_STRUCTURES
+    )
+      .filter(
+        (s) =>
+          typeof s?.type === "string" &&
+          typeof s?.label === "string" &&
+          s.type.length <= 40 &&
+          s.label.length <= 40
+      )
+      .slice(0, 30);
+    const typeSet = new Set(structureList.map((s) => s.type));
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
       max_tokens: 8192,
-      response_format: { type: "json_schema", json_schema: JSON_SCHEMA },
+      response_format: {
+        type: "json_schema",
+        json_schema: buildJsonSchema([...typeSet]),
+      },
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: buildSystemPrompt(structureList) },
         {
           role: "user",
           content: [
@@ -116,13 +152,16 @@ export async function POST(req: NextRequest) {
       }[];
     };
 
-    const placements = parsed.placements.slice(0, 80).map((p) => ({
-      type: p.type,
-      x: clamp(p.x, 0, 1),
-      y: clamp(p.y, 0, 1),
-      w: clamp(p.w, 0.02, 0.9),
-      rot: clamp(p.rot, -180, 180),
-    }));
+    const placements = parsed.placements
+      .filter((p) => typeSet.has(p.type))
+      .slice(0, 80)
+      .map((p) => ({
+        type: p.type,
+        x: clamp(p.x, 0, 1),
+        y: clamp(p.y, 0, 1),
+        w: clamp(p.w, 0.02, 0.9),
+        rot: clamp(p.rot, -180, 180),
+      }));
 
     return NextResponse.json({ placements });
   } catch (err) {
