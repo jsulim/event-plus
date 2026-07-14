@@ -28,6 +28,8 @@ function buildEditPrompt(removeLabels: string[], preserveLabels: string[]) {
 
 interface GenerateRequestBody {
   image?: string;
+  /** "fast" = fal 전용 모델(기본) / "quality" = gpt-image-1 고품질 */
+  engine?: "fast" | "quality";
   /** 0~1 정규화 [x, y, width, height] 목록 */
   boxes?: [number, number, number, number][];
   /** 제거 대상 라벨 목록 (프롬프트 지시용) */
@@ -64,7 +66,7 @@ async function eraseWithFal(
 
 export async function POST(req: NextRequest) {
   try {
-    const { image, boxes, removeLabels, preserveLabels } =
+    const { image, engine, boxes, removeLabels, preserveLabels } =
       (await req.json()) as GenerateRequestBody;
 
     if (!image || !image.startsWith("data:image/")) {
@@ -110,8 +112,8 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    // 1순위: fal.ai Bria Eraser (흰색=제거 마스크, 수 초)
-    if (process.env.FAL_KEY) {
+    // 빠름 모드: fal.ai Bria Eraser (흰색=제거 마스크, 수 초)
+    if (engine !== "quality" && process.env.FAL_KEY) {
       try {
         const whiteMask = Buffer.alloc(width * height * 3, 0);
         for (const [x0, y0, x1, y1] of rects) {
@@ -165,7 +167,7 @@ export async function POST(req: NextRequest) {
       mask: await toFile(maskPng, "mask.png", { type: "image/png" }),
       prompt: buildEditPrompt(removeLabels ?? [], preserveLabels ?? []),
       size: "auto",
-      quality: "medium",
+      quality: engine === "quality" ? "high" : "medium",
       input_fidelity: "high",
     });
 

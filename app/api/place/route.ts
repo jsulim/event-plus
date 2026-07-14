@@ -21,6 +21,8 @@ Keep each object at exactly the same position, size and orientation. Do not chan
 
 interface PlaceRequestBody {
   image?: string;
+  /** "fast" = fal Kontext(기본) / "quality" = gpt-image-1 고품질 */
+  engine?: "fast" | "quality";
   /** 배치된 구조물들의 bbox (0~1 정규화 [x,y,w,h]) — 배경 보존 합성용 */
   boxes?: [number, number, number, number][];
 }
@@ -103,7 +105,7 @@ async function compositePreservingBackground(
 
 export async function POST(req: NextRequest) {
   try {
-    const { image, boxes } = (await req.json()) as PlaceRequestBody;
+    const { image, engine, boxes } = (await req.json()) as PlaceRequestBody;
 
     if (!image || !image.startsWith("data:image/")) {
       return NextResponse.json(
@@ -125,8 +127,8 @@ export async function POST(req: NextRequest) {
       .toBuffer({ resolveWithObject: true });
     const { width, height } = resized.info;
 
-    // 1순위: fal Kontext 실사화 + 구조물 영역만 취하는 배경 보존 합성 (~15초)
-    if (process.env.FAL_KEY && boxes && boxes.length > 0) {
+    // 빠름 모드: fal Kontext 실사화 + 구조물 영역만 취하는 배경 보존 합성
+    if (engine !== "quality" && process.env.FAL_KEY && boxes && boxes.length > 0) {
       try {
         const jpeg = await sharp(resized.data).jpeg({ quality: 90 }).toBuffer();
         const redrawn = await kontextRedraw(jpeg);
@@ -152,7 +154,7 @@ export async function POST(req: NextRequest) {
       image: await toFile(resized.data, "image.png", { type: "image/png" }),
       prompt: PLACE_PROMPT,
       size: "auto",
-      quality: "medium",
+      quality: engine === "quality" ? "high" : "medium",
       input_fidelity: "high",
     });
 

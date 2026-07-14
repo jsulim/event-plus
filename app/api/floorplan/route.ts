@@ -48,7 +48,10 @@ async function floorplanWithFal(imagePng: Buffer): Promise<Buffer> {
 
 export async function POST(req: NextRequest) {
   try {
-    const { image } = (await req.json()) as { image?: string };
+    const { image, engine } = (await req.json()) as {
+      image?: string;
+      engine?: "fast" | "quality";
+    };
 
     if (!image || !image.startsWith("data:image/")) {
       return NextResponse.json(
@@ -68,8 +71,8 @@ export async function POST(req: NextRequest) {
       .png()
       .toBuffer();
 
-    // 1순위: fal.ai FLUX Kontext (~15초), 실패 시 gpt-image-1 폴백
-    if (process.env.FAL_KEY) {
+    // 빠름 모드: fal.ai FLUX Kontext (~15초), 실패 시 gpt-image-1 폴백
+    if (engine !== "quality" && process.env.FAL_KEY) {
       try {
         // 업로드 크기 절감: fal 전송은 JPEG로 (PNG 대비 ~1/8)
         const jpeg = await sharp(resized).jpeg({ quality: 90 }).toBuffer();
@@ -88,7 +91,7 @@ export async function POST(req: NextRequest) {
       image: await toFile(resized, "image.png", { type: "image/png" }),
       prompt: FLOORPLAN_PROMPT,
       size: "auto",
-      quality: "medium",
+      quality: engine === "quality" ? "high" : "medium",
     });
 
     const b64 = result.data?.[0]?.b64_json;

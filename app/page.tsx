@@ -6,7 +6,6 @@ import CompareSlider from "@/components/CompareSlider";
 import StructurePlacer from "@/components/StructurePlacer";
 import { detectWithYolo, warmupYolo } from "@/lib/yolo";
 import { mergeDetections } from "@/lib/merge";
-import { findSimilarRegions } from "@/lib/similar";
 import type {
   AnalyzeResponse,
   Classification,
@@ -54,60 +53,24 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [drawMode, setDrawMode] = useState(false);
+  /** true = 정밀 모드 (gpt-image-1 고품질, 느림) / false = 빠름 (fal 전용 모델) */
+  const [precise, setPrecise] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const userBoxSeq = useRef(0);
 
   const addUserBox = (bbox: [number, number, number, number]) => {
     const id = `user_${++userBoxSeq.current}`;
-    const seq = userBoxSeq.current;
     setObjects((prev) => [
       ...prev,
       {
         id,
-        label: `직접 지정 ${seq}`,
+        label: `직접 지정 ${userBoxSeq.current}`,
         classification: "remove",
         bbox,
         confidence: 1,
       },
     ]);
     setSelectedId(id);
-
-    // 그린 영역과 유사한 반복 객체를 자동 탐지해 제안 (브라우저 연산, 비용 없음)
-    if (image) {
-      findSimilarRegions(image, bbox)
-        .then((boxes) => {
-          if (boxes.length === 0) return;
-          setObjects((prev) => {
-            // 기존 박스와 크게 겹치는 제안은 제외
-            const fresh = boxes.filter((b) =>
-              prev.every((o) => {
-                const ix = Math.max(
-                  0,
-                  Math.min(o.bbox[0] + o.bbox[2], b[0] + b[2]) -
-                    Math.max(o.bbox[0], b[0])
-                );
-                const iy = Math.max(
-                  0,
-                  Math.min(o.bbox[1] + o.bbox[3], b[1] + b[3]) -
-                    Math.max(o.bbox[1], b[1])
-                );
-                return ix * iy < 0.4 * Math.min(o.bbox[2] * o.bbox[3], b[2] * b[3]);
-              })
-            );
-            return [
-              ...prev,
-              ...fresh.map((b, i) => ({
-                id: `user_sim_${seq}_${i + 1}`,
-                label: `유사 객체 (직접 지정 ${seq})`,
-                classification: "remove" as const,
-                bbox: b,
-                confidence: 0.7,
-              })),
-            ];
-          });
-        })
-        .catch((e) => console.warn("[similar] 탐지 실패:", e));
-    }
   };
 
   const removeUserBox = (id: string) => {
@@ -260,6 +223,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           image,
+          engine: precise ? "quality" : "fast",
           boxes: removeTargets.map((o) => o.bbox),
           removeLabels: [...new Set(removeTargets.map((o) => o.label))],
           preserveLabels: [
@@ -293,7 +257,11 @@ export default function Home() {
       const res = await fetch("/api/place", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: collage, boxes: itemBoxes }),
+        body: JSON.stringify({
+          image: collage,
+          boxes: itemBoxes,
+          engine: precise ? "quality" : "fast",
+        }),
       });
       const data = (await res.json()) as GenerateResponse & { error?: string };
       if (!res.ok) throw new Error(data.error ?? `배치 실패 (${res.status})`);
@@ -394,6 +362,15 @@ export default function Home() {
           사진 한 장으로 빈 공간 생성부터 구조물 배치, 제안용 조감도까지
           만들어보세요.
         </p>
+        <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-sm text-gray-600">
+          <input
+            type="checkbox"
+            checked={precise}
+            onChange={(e) => setPrecise(e.target.checked)}
+            className="h-4 w-4 accent-blue-600"
+          />
+          정밀 모드 <span className="text-xs text-gray-400">(이미지 품질 우선 — 생성이 30~60초로 느려집니다)</span>
+        </label>
       </header>
 
       {error && (
@@ -572,7 +549,7 @@ export default function Home() {
                     }`}
                   >
                     {drawMode
-                      ? "그리기 종료 (드래그해서 영역 추가 중 — 비슷한 객체도 자동 탐지됩니다)"
+                      ? "그리기 종료 (드래그해서 영역 추가 중)"
                       : "+ 지울 영역 직접 그리기"}
                   </button>
                 )}
@@ -642,7 +619,11 @@ export default function Home() {
               새 사진으로 시작
             </button>
           </div>
-          <FloorplanBlock key={resultImage} source={resultImage} />
+          <FloorplanBlock
+            key={resultImage}
+            source={resultImage}
+            engine={precise ? "quality" : "fast"}
+          />
         </div>
       )}
 
@@ -690,7 +671,11 @@ export default function Home() {
               새 사진으로 시작
             </button>
           </div>
-          <FloorplanBlock key={placedImage} source={placedImage} />
+          <FloorplanBlock
+            key={placedImage}
+            source={placedImage}
+            engine={precise ? "quality" : "fast"}
+          />
         </div>
       )}
     </main>
@@ -704,7 +689,13 @@ function Spinner() {
 }
 
 /** 결과 이미지를 아이소메트릭 조감도로 변환하는 블록 (결과/배치 화면 공용) */
-function FloorplanBlock({ source }: { source: string }) {
+function FloorplanBlock({
+  source,
+  engine,
+}: {
+  source: string;
+  engine: "fast" | "quality";
+}) {
   const [busy, setBusy] = useState(false);
   const [img, setImg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -716,7 +707,7 @@ function FloorplanBlock({ source }: { source: string }) {
       const res = await fetch("/api/floorplan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: source }),
+        body: JSON.stringify({ image: source, engine }),
       });
       const data = (await res.json()) as GenerateResponse & { error?: string };
       if (!res.ok) throw new Error(data.error ?? `조감도 생성 실패 (${res.status})`);
