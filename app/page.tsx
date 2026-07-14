@@ -54,7 +54,7 @@ export default function Home() {
   const [dragOver, setDragOver] = useState(false);
   const [drawMode, setDrawMode] = useState(false);
   /** true = 정밀 모드 (gpt-image-1 고품질, 느림) / false = 빠름 (fal 전용 모델) */
-  const [precise, setPrecise] = useState(false);
+  const [precise, setPrecise] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const userBoxSeq = useRef(0);
 
@@ -369,7 +369,7 @@ export default function Home() {
             onChange={(e) => setPrecise(e.target.checked)}
             className="h-4 w-4 accent-blue-600"
           />
-          정밀 모드 <span className="text-xs text-gray-400">(이미지 품질 우선 — 생성이 30~60초로 느려집니다)</span>
+          정밀 모드 <span className="text-xs text-gray-400">(기본 켜짐 — 끄면 빠르지만 품질이 떨어집니다)</span>
         </label>
       </header>
 
