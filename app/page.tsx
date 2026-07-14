@@ -210,6 +210,14 @@ export default function Home() {
         body: JSON.stringify({
           image,
           boxes: removeTargets.map((o) => o.bbox),
+          removeLabels: [...new Set(removeTargets.map((o) => o.label))],
+          preserveLabels: [
+            ...new Set(
+              objects
+                .filter((o) => o.classification === "preserve")
+                .map((o) => o.label)
+            ),
+          ],
         }),
       });
       const data = (await res.json()) as GenerateResponse & { error?: string };
