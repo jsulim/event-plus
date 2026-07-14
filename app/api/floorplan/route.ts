@@ -9,11 +9,13 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const MAX_DIM = 1536;
 
-const PLACE_PROMPT = `이 이미지는 실제 공간 사진 위에 행사 구조물 그림(의자, 테이블, 부스, 무대, 배너 등)을 임시로 합성한 것입니다.
-합성된 구조물들을 각각 지금 놓인 위치, 크기, 방향을 그대로 유지하면서,
-이 공간의 원근(perspective), 조명, 그림자에 자연스럽게 어울리는 실사 스타일로 다시 그려주세요.
-바닥에 닿는 부분에는 자연스러운 그림자를 추가하세요.
-배경 공간(벽, 바닥, 천장, 기둥, 조명)은 원본 그대로 유지하고, 구조물을 추가로 만들어 넣지 마세요.`;
+const FLOORPLAN_PROMPT = `이 행사 공간 사진을 아이소메트릭(쿼터뷰) 조감도 렌더링으로 변환해주세요.
+
+요구사항:
+- 공간 전체가 한눈에 보이는 미니어처 모형 스타일: 위에서 비스듬히 내려다보는 아이소메트릭 시점, 앞쪽 벽은 잘라낸 단면(cutaway)으로 표현
+- 사진 속 공간의 구조(벽, 기둥, 출입구, 무대, 창문)와 가구·좌석·구조물의 배치, 줄 수, 대략적 개수를 최대한 그대로 유지
+- 깔끔한 행사 제안서용 3D 렌더링 품질: 부드러운 조명, 정돈된 색감, 검은색 배경
+- 사진에 없는 물체를 새로 추가하지 마세요`;
 
 export async function POST(req: NextRequest) {
   try {
@@ -27,7 +29,6 @@ export async function POST(req: NextRequest) {
     }
 
     const inputBuffer = Buffer.from(image.split(",")[1], "base64");
-
     const resized = await sharp(inputBuffer)
       .resize({
         width: MAX_DIM,
@@ -41,15 +42,14 @@ export async function POST(req: NextRequest) {
     const result = await openai.images.edit({
       model: "gpt-image-1",
       image: await toFile(resized, "image.png", { type: "image/png" }),
-      prompt: PLACE_PROMPT,
+      prompt: FLOORPLAN_PROMPT,
       size: "auto",
-      input_fidelity: "high",
     });
 
     const b64 = result.data?.[0]?.b64_json;
     if (!b64) {
       return NextResponse.json(
-        { error: "이미지 생성 결과가 비어 있습니다." },
+        { error: "조감도 생성 결과가 비어 있습니다." },
         { status: 502 }
       );
     }
@@ -59,9 +59,11 @@ export async function POST(req: NextRequest) {
     };
     return NextResponse.json(body);
   } catch (err) {
-    console.error("[/api/place] error:", err);
+    console.error("[/api/floorplan] error:", err);
     const message =
-      err instanceof Error ? err.message : "배치 중 알 수 없는 오류가 발생했습니다.";
+      err instanceof Error
+        ? err.message
+        : "조감도 생성 중 알 수 없는 오류가 발생했습니다.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

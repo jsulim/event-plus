@@ -3,7 +3,7 @@ import OpenAI, { toFile } from "openai";
 import sharp from "sharp";
 import type { GenerateResponse } from "@/lib/types";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 

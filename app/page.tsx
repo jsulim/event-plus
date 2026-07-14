@@ -578,6 +578,7 @@ export default function Home() {
               새 사진으로 시작
             </button>
           </div>
+          <FloorplanBlock key={resultImage} source={resultImage} />
         </div>
       )}
 
@@ -625,6 +626,7 @@ export default function Home() {
               새 사진으로 시작
             </button>
           </div>
+          <FloorplanBlock key={placedImage} source={placedImage} />
         </div>
       )}
     </main>
@@ -634,5 +636,77 @@ export default function Home() {
 function Spinner() {
   return (
     <span className="inline-block h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
+  );
+}
+
+/** 결과 이미지를 아이소메트릭 조감도로 변환하는 블록 (결과/배치 화면 공용) */
+function FloorplanBlock({ source }: { source: string }) {
+  const [busy, setBusy] = useState(false);
+  const [img, setImg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const run = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/floorplan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: source }),
+      });
+      const data = (await res.json()) as GenerateResponse & { error?: string };
+      if (!res.ok) throw new Error(data.error ?? `조감도 생성 실패 (${res.status})`);
+      setImg(data.resultImage);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "조감도 생성 중 오류가 발생했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      {err && (
+        <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {err}
+        </div>
+      )}
+      {img ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={img} alt="아이소메트릭 조감도" className="w-full rounded-lg" />
+          <div className="flex gap-3">
+            <a
+              href={img}
+              download="event-plus-floorplan.png"
+              className="rounded-lg bg-blue-600 px-4 py-2.5 font-medium text-white hover:bg-blue-700"
+            >
+              조감도 다운로드
+            </a>
+            <button
+              onClick={run}
+              disabled={busy}
+              className="rounded-lg border border-gray-300 px-4 py-2.5 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {busy ? "다시 생성 중…" : "다시 생성"}
+            </button>
+          </div>
+        </>
+      ) : busy ? (
+        <div className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3">
+          <Spinner />
+          <span className="text-sm text-gray-600">
+            조감도를 생성하고 있습니다… (수십 초 걸릴 수 있어요)
+          </span>
+        </div>
+      ) : (
+        <button
+          onClick={run}
+          className="self-start rounded-lg border border-purple-300 bg-purple-50 px-4 py-2.5 font-medium text-purple-700 hover:bg-purple-100"
+        >
+          🗺 조감도(아이소메트릭 뷰) 생성
+        </button>
+      )}
+    </div>
   );
 }
